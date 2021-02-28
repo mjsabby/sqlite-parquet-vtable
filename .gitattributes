@@ -1,0 +1,31 @@
+* text    eol=lf
+*.png     binary
+*.pdf     binary
+*.gif     binary
+*.jpg     binary
+*.exe     binary
+*.o       binary
+*.dll     binary
+*.exe     binary
+*.bat     binary
+*.idx     binary
+*.jpeg    binary
+*.db      binary
+*.cmd     binary
+*.pptx    binary
+*.svg     binary
+*.odp     binary
+*.ttf     binary
+*.vcproj  binary
+*.sln     binary
+*.vcxproj binary
+*.filters binary
+*.CRW     binary
+*.xls     binary
+*.doctree binary
+*.bz2     binary
+*.pickle  binary
+*.vpp     binary
+*.md      binary
+*.pnm     binary
+
