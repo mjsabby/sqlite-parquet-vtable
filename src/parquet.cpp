@@ -9,6 +9,7 @@
  *    SELECT * FROM demo;
  *
  */
+#define SQLITE_CORE
 #include <sqlite3ext.h>
 SQLITE_EXTENSION_INIT1
 #include <assert.h>
@@ -20,6 +21,7 @@ SQLITE_EXTENSION_INIT1
 #include <stdlib.h>
 #include <string.h>
 
+#include "api.h"
 #include "parquet_cursor.h"
 #include "parquet_filter.h"
 #include "parquet_table.h"
@@ -83,30 +85,25 @@ static int parquetDisconnect(sqlite3_vtab *pVtab)
     return SQLITE_OK;
 }
 
-static int parquetConnect(sqlite3 *db, void *pAux, int argc, const char *const *argv, sqlite3_vtab **ppVtab,
-                          char **pzErr)
+static int parquetConnect(sqlite3 *db, void *pAux, int argc, const char *const *argv, sqlite3_vtab **ppVtab, char **pzErr)
 {
     try
     {
-        if (argc != 4 || strlen(argv[3]) < 2)
+        if (argc < 4 || strlen(argv[3]) < 2)
         {
             *pzErr = sqlite3_mprintf("must provide exactly one argument, the path to a parquet file");
             return SQLITE_ERROR;
         }
 
-        std::string tableName = argv[2];
-        // Remove the delimiting single quotes
-        std::string fname = argv[3];
-        fname = fname.substr(1, fname.length() - 2);
-        std::unique_ptr<sqlite3_vtab_parquet, void (*)(void *)> vtab(
-            (sqlite3_vtab_parquet *)sqlite3_malloc(sizeof(sqlite3_vtab_parquet)), sqlite3_free);
+        std::unique_ptr<sqlite3_vtab_parquet, void (*)(void *)> vtab((sqlite3_vtab_parquet *)sqlite3_malloc(sizeof(sqlite3_vtab_parquet)),
+                                                                     sqlite3_free);
         memset(vtab.get(), 0, sizeof(*vtab.get()));
 
         try
         {
-            std::unique_ptr<ParquetTable> table(new ParquetTable(fname, tableName));
+            std::unique_ptr<ParquetTable> table(new ParquetTable(argv[2], argc, argv));
 
-            std::string create = table->CreateStatement();
+            std::string create = table->getCreateStatement();
             int rc = sqlite3_declare_vtab(db, create.data());
             if (rc)
                 return rc;
@@ -136,8 +133,7 @@ static int parquetConnect(sqlite3 *db, void *pAux, int argc, const char *const *
 ** The xConnect and xCreate methods do the same thing, but they must be
 ** different so that the virtual table is not an eponymous virtual table.
 */
-static int parquetCreate(sqlite3 *db, void *pAux, int argc, const char *const *argv, sqlite3_vtab **ppVtab,
-                         char **pzErr)
+static int parquetCreate(sqlite3 *db, void *pAux, int argc, const char *const *argv, sqlite3_vtab **ppVtab, char **pzErr)
 {
     try
     {
@@ -194,9 +190,8 @@ void persistConstraints(sqlite3 *db, ParquetCursor *cursor)
         std::string actualStr = quoteBlob(actual);
 
         // This is only advisory, so ignore failures.
-        char *sql = sqlite3_mprintf(
-            "INSERT OR REPLACE INTO _%s_rowgroups(clause, estimate, actual) VALUES ('%q', %s, %s)",
-            cursor->getTable()->getTableName().c_str(), desc.c_str(), estimatedStr.c_str(), actualStr.c_str());
+        char *sql = sqlite3_mprintf("INSERT OR REPLACE INTO _%s_rowgroups(clause, estimate, actual) VALUES ('%q', %s, %s)",
+                                    cursor->getTable()->getTableName().c_str(), desc.c_str(), estimatedStr.c_str(), actualStr.c_str());
 
         if (sql == NULL)
             return;
@@ -304,7 +299,7 @@ static int parquetColumn(sqlite3_vtab_cursor *cur, /* The cursor */
             }
             case parquet::Type::BYTE_ARRAY: {
                 parquet::ByteArray *rv = cursor->getByteArray(col);
-                if (cursor->getLogicalType(col) == parquet::LogicalType::UTF8)
+                if (cursor->isStringType(col))
                 {
                     sqlite3_result_text(ctx, (const char *)rv->ptr, rv->len, SQLITE_TRANSIENT);
                 }
@@ -462,9 +457,8 @@ void debugConstraints(sqlite3_index_info *pIdxInfo, ParquetTable *table, int arg
             }
             j++;
         }
-        printf("  constraint %d: col %s %s %s, usable %d\n", i,
-               table->columnName(pIdxInfo->aConstraint[i].iColumn).data(), opName(pIdxInfo->aConstraint[i].op),
-               valueStr.data(), pIdxInfo->aConstraint[i].usable);
+        printf("  constraint %d: col %s %s %s, usable %d\n", i, table->columnName(pIdxInfo->aConstraint[i].iColumn).data(),
+               opName(pIdxInfo->aConstraint[i].op), valueStr.data(), pIdxInfo->aConstraint[i].usable);
     }
 }
 #endif
@@ -509,8 +503,7 @@ std::vector<unsigned char> getRowGroupsForClause(sqlite3 *db, std::string table,
     std::vector<unsigned char> rv;
 
     std::unique_ptr<char, void (*)(void *)> sql(
-        sqlite3_mprintf("SELECT actual FROM _%s_rowgroups WHERE clause = '%q'", table.c_str(), clause.c_str()),
-        sqlite3_free);
+        sqlite3_mprintf("SELECT actual FROM _%s_rowgroups WHERE clause = '%q'", table.c_str(), clause.c_str()), sqlite3_free);
 
     if (sql.get() == NULL)
         return rv;
@@ -554,11 +547,9 @@ static int parquetFilter(sqlite3_vtab_cursor *cur, int idxNum, const char *idxSt
 #ifdef DEBUG
         struct timeval tv;
         gettimeofday(&tv, NULL);
-        unsigned long long millisecondsSinceEpoch =
-            (unsigned long long)(tv.tv_sec) * 1000 + (unsigned long long)(tv.tv_usec) / 1000;
+        unsigned long long millisecondsSinceEpoch = (unsigned long long)(tv.tv_sec) * 1000 + (unsigned long long)(tv.tv_usec) / 1000;
 
-        printf("%llu xFilter: idxNum=%d, idxStr=%lu, argc=%d\n", millisecondsSinceEpoch, idxNum,
-               (long unsigned int)idxStr, argc);
+        printf("%llu xFilter: idxNum=%d, idxStr=%lu, argc=%d\n", millisecondsSinceEpoch, idxNum, (long unsigned int)idxStr, argc);
         debugConstraints(indexInfo, cursor->getTable(), argc, argv);
 #endif
         std::vector<Constraint> constraints;
@@ -619,11 +610,9 @@ static int parquetFilter(sqlite3_vtab_cursor *cur, int idxNum, const char *idxSt
 
             RowGroupBitmap bitmap = RowGroupBitmap(cursor->getNumRowGroups());
             Constraint dummy(bitmap, indexInfo->aConstraint[i].iColumn, columnName,
-                             constraintOperatorFromSqlite(indexInfo->aConstraint[i].op), type, intValue, doubleValue,
-                             blobValue);
+                             constraintOperatorFromSqlite(indexInfo->aConstraint[i].op), type, intValue, doubleValue, blobValue);
 
-            std::vector<unsigned char> actual =
-                getRowGroupsForClause(db, cursor->getTable()->getTableName(), dummy.describe());
+            std::vector<unsigned char> actual = getRowGroupsForClause(db, cursor->getTable()->getTableName(), dummy.describe());
             if (actual.size() > 0)
             {
                 // Initialize the estimate to be the actual -- eventually they'll converge
@@ -633,8 +622,7 @@ static int parquetFilter(sqlite3_vtab_cursor *cur, int idxNum, const char *idxSt
             }
 
             Constraint constraint(bitmap, indexInfo->aConstraint[i].iColumn, columnName,
-                                  constraintOperatorFromSqlite(indexInfo->aConstraint[i].op), type, intValue,
-                                  doubleValue, blobValue);
+                                  constraintOperatorFromSqlite(indexInfo->aConstraint[i].op), type, intValue, doubleValue, blobValue);
 
             constraints.push_back(constraint);
             j++;
@@ -666,12 +654,10 @@ static int parquetBestIndex(sqlite3_vtab *tab, sqlite3_index_info *pIdxInfo)
 #ifdef DEBUG
         struct timeval tv;
         gettimeofday(&tv, NULL);
-        unsigned long long millisecondsSinceEpoch =
-            (unsigned long long)(tv.tv_sec) * 1000 + (unsigned long long)(tv.tv_usec) / 1000;
+        unsigned long long millisecondsSinceEpoch = (unsigned long long)(tv.tv_sec) * 1000 + (unsigned long long)(tv.tv_usec) / 1000;
 
         ParquetTable *table = ((sqlite3_vtab_parquet *)tab)->table;
-        printf("%llu xBestIndex: nConstraint=%d, nOrderBy=%d\n", millisecondsSinceEpoch, pIdxInfo->nConstraint,
-               pIdxInfo->nOrderBy);
+        printf("%llu xBestIndex: nConstraint=%d, nOrderBy=%d\n", millisecondsSinceEpoch, pIdxInfo->nConstraint, pIdxInfo->nOrderBy);
         debugConstraints(pIdxInfo, table, 0, NULL);
 #endif
         // We traverse in rowid ascending order, so if they're asking for it to be ordered like that,
@@ -717,12 +703,12 @@ static int parquetBestIndex(sqlite3_vtab *tab, sqlite3_index_info *pIdxInfo)
         dupe->aConstraint = (sqlite3_index_info::sqlite3_index_constraint *)((char *)dupe + sizeof(sqlite3_index_info));
         dupe->aOrderBy =
             (sqlite3_index_info::sqlite3_index_orderby *)((char *)dupe + sizeof(sqlite3_index_info) +
-                                                          pIdxInfo->nConstraint *
-                                                              sizeof(sqlite3_index_info::sqlite3_index_constraint));
-        dupe->aConstraintUsage = (sqlite3_index_info::sqlite3_index_constraint_usage
-                                      *)((char *)dupe + sizeof(sqlite3_index_info) +
-                                         pIdxInfo->nConstraint * sizeof(sqlite3_index_info::sqlite3_index_constraint) +
-                                         pIdxInfo->nOrderBy * sizeof(sqlite3_index_info::sqlite3_index_orderby));
+                                                          pIdxInfo->nConstraint * sizeof(sqlite3_index_info::sqlite3_index_constraint));
+        dupe->aConstraintUsage =
+            (sqlite3_index_info::sqlite3_index_constraint_usage *)((char *)dupe + sizeof(sqlite3_index_info) +
+                                                                   pIdxInfo->nConstraint *
+                                                                       sizeof(sqlite3_index_info::sqlite3_index_constraint) +
+                                                                   pIdxInfo->nOrderBy * sizeof(sqlite3_index_info::sqlite3_index_orderby));
 
         for (int i = 0; i < pIdxInfo->nConstraint; i++)
         {
@@ -776,18 +762,36 @@ static sqlite3_module ParquetModule = {
     0,                 /* xRename */
 };
 
-/*
- * This routine is called when the extension is loaded.  The new
- * Parquet virtual table module is registered with the calling database
- * connection.
- */
-extern "C"
+extern "C" void ParquetSQLiteProcessWideInitExported(char *tmp)
 {
-    int sqlite3_parquet_init(sqlite3 *db, char **pzErrMsg, const sqlite3_api_routines *pApi)
+    sqlite3_temp_directory = tmp;
+}
+
+extern "C" int ParquetSQLiteOpenDatabaseExported(const char *path, void **retVal)
+{
+    int rc;
+    auto *const s = reinterpret_cast<sqlite3 **>(retVal);
+
+    if ((rc = sqlite3_open_v2(path, s, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nullptr)) == SQLITE_OK)
     {
-        int rc;
-        SQLITE_EXTENSION_INIT2(pApi);
-        rc = sqlite3_create_module(db, "parquet", &ParquetModule, 0);
-        return rc;
+        rc = sqlite3_create_module(*s, "parquet", &ParquetModule, nullptr);
     }
+
+    return rc;
+}
+
+extern "C" int ParquetSQLiteCloseDatabaseExported(void *db)
+{
+    return sqlite3_close_v2(static_cast<sqlite3 *>(db));
+}
+
+extern "C" int ParquetSQLiteExecExported(void *db, const char *sql, int (*callback)(void *, int, char **, char **), void *cbdata,
+                                         char **errmsg)
+{
+    return sqlite3_exec(static_cast<sqlite3 *>(db), sql, callback, cbdata, errmsg);
+}
+
+extern "C" void ParquetSQLiteFreeMemoryExported(void *str)
+{
+    sqlite3_free(str);
 }

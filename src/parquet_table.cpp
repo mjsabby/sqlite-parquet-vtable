@@ -2,10 +2,28 @@
 
 #include "parquet/api/reader.h"
 
-ParquetTable::ParquetTable(std::string file, std::string tableName) : file(file), tableName(tableName)
+ParquetTable::ParquetTable(const std::string &tableName, int argc, const char *const *argv)
 {
-    std::unique_ptr<parquet::ParquetFileReader> reader = parquet::ParquetFileReader::OpenFile(file.data());
-    metadata = reader->metadata();
+    for (int i = 0; i < argc - 3; ++i)
+    {
+        std::string fname = argv[i + 3];
+        fname = fname.substr(1, fname.length() - 2);
+        this->files.push_back(parquet::ParquetFileReader::OpenFile(fname, true, parquet::default_reader_properties()));
+        const int fileIndex = static_cast<int>(this->files.size()) - 1;
+        const auto &file = this->files[fileIndex];
+
+        const int numRowGroups = file->metadata()->num_row_groups();
+        this->totalRowGroups += numRowGroups;
+        this->totalRows += file->metadata()->num_rows();
+
+        for (int j = 0; j < numRowGroups; ++j)
+        {
+            this->indices.emplace_back(fileIndex, j);
+        }
+    }
+
+    this->tableName = tableName;
+    this->CreateStatement(this->files[0]->metadata()->schema());
 }
 
 std::string ParquetTable::columnName(int i)
@@ -20,12 +38,32 @@ unsigned int ParquetTable::getNumColumns()
     return columnNames.size();
 }
 
-std::string ParquetTable::CreateStatement()
+const parquet::RowGroupMetaData *ParquetTable::getRowGroupMetaData(int index)
 {
-    std::unique_ptr<parquet::ParquetFileReader> reader =
-        parquet::ParquetFileReader::OpenFile(file.data(), true, parquet::default_reader_properties(), metadata);
+    const auto f = this->indices[index];
+    return this->files[f.FileIndex]->RowGroup(f.RowGroupIndex)->metadata();
+}
+
+std::shared_ptr<parquet::RowGroupReader> ParquetTable::getRowGroupReader(int index)
+{
+    const auto f = this->indices[index];
+    return this->files[f.FileIndex]->RowGroup(f.RowGroupIndex);
+}
+
+const parquet::ParquetFileReader *ParquetTable::getFileReader(int index)
+{
+    const auto f = this->indices[index];
+    return this->files[f.FileIndex].get();
+}
+
+std::string ParquetTable::getCreateStatement()
+{
+    return this->create;
+}
+
+void ParquetTable::CreateStatement(const parquet::SchemaDescriptor *schema)
+{
     std::string text("CREATE TABLE x(");
-    auto schema = reader->metadata()->schema();
 
     for (auto i = 0; i < schema->num_columns(); i++)
     {
@@ -44,12 +82,15 @@ std::string ParquetTable::CreateStatement()
             throw std::invalid_argument(ss.str());
         }
 
+        /* TODO: Do something better than just ignoring */
+        /*
         if (_col->is_repeated())
         {
             std::ostringstream ss;
             ss << __FILE__ << ":" << __LINE__ << ": column " << i << " has non-scalar type";
             throw std::invalid_argument(ss.str());
         }
+        */
 
         parquet::schema::PrimitiveNode *col = (parquet::schema::PrimitiveNode *)_col;
 
@@ -71,37 +112,35 @@ std::string ParquetTable::CreateStatement()
         std::string type;
 
         parquet::Type::type physical = col->physical_type();
-        parquet::LogicalType::type logical = col->logical_type();
+        const auto &logical = col->logical_type();
         // Be explicit about which types we understand so we don't mislead someone
         // whose unsigned ints start getting interpreted as signed. (We could
         // support this for UINT_8/16/32 -- and for UINT_64 we could throw if
         // the high bit was set.)
-        if (logical == parquet::LogicalType::NONE || logical == parquet::LogicalType::UTF8 ||
-            logical == parquet::LogicalType::DATE || logical == parquet::LogicalType::TIME_MILLIS ||
-            logical == parquet::LogicalType::TIMESTAMP_MILLIS || logical == parquet::LogicalType::TIME_MICROS ||
-            logical == parquet::LogicalType::TIMESTAMP_MICROS || logical == parquet::LogicalType::INT_8 ||
-            logical == parquet::LogicalType::INT_16 || logical == parquet::LogicalType::INT_32 ||
-            logical == parquet::LogicalType::INT_64)
+        if (logical->is_none() || logical->is_string() || logical->is_date() || logical->is_time() || logical->is_timestamp() ||
+            logical->is_int())
         {
             switch (physical)
             {
             case parquet::Type::BOOLEAN:
                 type = "TINYINT";
                 break;
-            case parquet::Type::INT32:
-                if (logical == parquet::LogicalType::NONE || logical == parquet::LogicalType::INT_32)
+            case parquet::Type::INT32: {
+                const auto &integerType = arrow::internal::checked_pointer_cast<const parquet::IntLogicalType>(logical);
+                if (logical->is_none() || (integerType->is_signed() && integerType->bit_width() == 32))
                 {
                     type = "INT";
                 }
-                else if (logical == parquet::LogicalType::INT_8)
+                else if (integerType->is_signed() && integerType->bit_width() == 8)
                 {
                     type = "TINYINT";
                 }
-                else if (logical == parquet::LogicalType::INT_16)
+                else if (integerType->is_signed() && integerType->bit_width() == 16)
                 {
                     type = "SMALLINT";
                 }
                 break;
+            }
             case parquet::Type::INT96:
                 // INT96 is used for nanosecond precision on timestamps; we truncate
                 // to millisecond precision.
@@ -115,7 +154,7 @@ std::string ParquetTable::CreateStatement()
                 type = "DOUBLE";
                 break;
             case parquet::Type::BYTE_ARRAY:
-                if (logical == parquet::LogicalType::UTF8)
+                if (logical->is_string())
                 {
                     type = "TEXT";
                 }
@@ -135,9 +174,8 @@ std::string ParquetTable::CreateStatement()
         if (type.empty())
         {
             std::ostringstream ss;
-            ss << __FILE__ << ":" << __LINE__ << ": column " << i
-               << " has unsupported type: " << parquet::TypeToString(physical) << "/"
-               << parquet::LogicalTypeToString(logical);
+            ss << __FILE__ << ":" << __LINE__ << ": column " << i << " has unsupported type: " << parquet::TypeToString(physical) << "/"
+               << logical->ToString();
 
             throw std::invalid_argument(ss.str());
         }
@@ -152,18 +190,9 @@ std::string ParquetTable::CreateStatement()
         text += type;
     }
     text += ");";
-    return text;
+    this->create = text;
 }
 
-std::shared_ptr<parquet::FileMetaData> ParquetTable::getMetadata()
-{
-    return metadata;
-}
-
-const std::string &ParquetTable::getFile()
-{
-    return file;
-}
 const std::string &ParquetTable::getTableName()
 {
     return tableName;

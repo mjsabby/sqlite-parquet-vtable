@@ -1,0 +1,22 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 16
+VisualStudioVersion = 16.0.31019.194
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ParquetSQLite", "ParquetSQLite.vcxproj", "{4D4ACCA5-B2BE-480F-835D-7C27F79ED05D}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Release|x64 = Release|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{4D4ACCA5-B2BE-480F-835D-7C27F79ED05D}.Release|x64.ActiveCfg = Release|x64
+		{4D4ACCA5-B2BE-480F-835D-7C27F79ED05D}.Release|x64.Build.0 = Release|x64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {50B87752-F9DC-4740-99BB-A0264BF5744E}
+	EndGlobalSection
+EndGlobal

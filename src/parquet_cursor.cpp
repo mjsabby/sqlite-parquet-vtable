@@ -2,7 +2,6 @@
 
 ParquetCursor::ParquetCursor(ParquetTable *table) : table(table)
 {
-    reader = NULL;
     reset(std::vector<Constraint>());
 }
 
@@ -34,8 +33,7 @@ bool ParquetCursor::currentRowGroupSatisfiesRowIdFilter(Constraint &constraint)
     }
 }
 
-bool ParquetCursor::currentRowGroupSatisfiesBlobFilter(Constraint &constraint,
-                                                       std::shared_ptr<parquet::RowGroupStatistics> _stats)
+bool ParquetCursor::currentRowGroupSatisfiesBlobFilter(Constraint &constraint, std::shared_ptr<parquet::Statistics> _stats)
 {
     if (!_stats->HasMinMax())
     {
@@ -56,8 +54,7 @@ bool ParquetCursor::currentRowGroupSatisfiesBlobFilter(Constraint &constraint,
 
     if (pqType == parquet::Type::BYTE_ARRAY)
     {
-        parquet::TypedRowGroupStatistics<parquet::DataType<parquet::Type::BYTE_ARRAY>> *stats =
-            (parquet::TypedRowGroupStatistics<parquet::DataType<parquet::Type::BYTE_ARRAY>> *)_stats.get();
+        parquet::ByteArrayStatistics *stats = (parquet::ByteArrayStatistics *)_stats.get();
 
         minPtr = stats->min().ptr;
         minLen = stats->min().len;
@@ -121,11 +118,9 @@ bool ParquetCursor::currentRowGroupSatisfiesBlobFilter(Constraint &constraint,
     }
 }
 
-bool ParquetCursor::currentRowGroupSatisfiesTextFilter(Constraint &constraint,
-                                                       std::shared_ptr<parquet::RowGroupStatistics> _stats)
+bool ParquetCursor::currentRowGroupSatisfiesTextFilter(Constraint &constraint, std::shared_ptr<parquet::Statistics> _stats)
 {
-    parquet::TypedRowGroupStatistics<parquet::DataType<parquet::Type::BYTE_ARRAY>> *stats =
-        (parquet::TypedRowGroupStatistics<parquet::DataType<parquet::Type::BYTE_ARRAY>> *)_stats.get();
+    parquet::ByteArrayStatistics *stats = (parquet::ByteArrayStatistics *)_stats.get();
 
     if (!stats->HasMinMax())
     {
@@ -174,9 +169,9 @@ bool ParquetCursor::currentRowGroupSatisfiesTextFilter(Constraint &constraint,
 
 int64_t int96toMsSinceEpoch(const parquet::Int96 &rv)
 {
-    __int128 ns = rv.value[0] + ((unsigned long)rv.value[1] << 32);
-    __int128 julianDay = rv.value[2];
-    __int128 nsSinceEpoch = (julianDay - 2440588);
+    int64_t ns = rv.value[0] + ((unsigned long)rv.value[1] << 32);
+    int64_t julianDay = rv.value[2];
+    int64_t nsSinceEpoch = (julianDay - 2440588);
     nsSinceEpoch *= 86400;
     nsSinceEpoch *= 1000 * 1000 * 1000;
     nsSinceEpoch += ns;
@@ -184,8 +179,7 @@ int64_t int96toMsSinceEpoch(const parquet::Int96 &rv)
     return nsSinceEpoch;
 }
 
-bool ParquetCursor::currentRowGroupSatisfiesIntegerFilter(Constraint &constraint,
-                                                          std::shared_ptr<parquet::RowGroupStatistics> _stats)
+bool ParquetCursor::currentRowGroupSatisfiesIntegerFilter(Constraint &constraint, std::shared_ptr<parquet::Statistics> _stats)
 {
     if (!_stats->HasMinMax())
     {
@@ -205,32 +199,28 @@ bool ParquetCursor::currentRowGroupSatisfiesIntegerFilter(Constraint &constraint
 
     if (pqType == parquet::Type::INT32)
     {
-        parquet::TypedRowGroupStatistics<parquet::DataType<parquet::Type::INT32>> *stats =
-            (parquet::TypedRowGroupStatistics<parquet::DataType<parquet::Type::INT32>> *)_stats.get();
+        auto *stats = dynamic_cast<parquet::Int32Statistics *>(_stats.get());
 
         min = stats->min();
         max = stats->max();
     }
     else if (pqType == parquet::Type::INT64)
     {
-        parquet::TypedRowGroupStatistics<parquet::DataType<parquet::Type::INT64>> *stats =
-            (parquet::TypedRowGroupStatistics<parquet::DataType<parquet::Type::INT64>> *)_stats.get();
+        auto *stats = dynamic_cast<parquet::Int64Statistics *>(_stats.get());
 
         min = stats->min();
         max = stats->max();
     }
     else if (pqType == parquet::Type::INT96)
     {
-        parquet::TypedRowGroupStatistics<parquet::DataType<parquet::Type::INT96>> *stats =
-            (parquet::TypedRowGroupStatistics<parquet::DataType<parquet::Type::INT96>> *)_stats.get();
+        auto *stats = dynamic_cast<parquet::TypedStatistics<parquet::Int96Type> *>(_stats.get());
 
         min = int96toMsSinceEpoch(stats->min());
         max = int96toMsSinceEpoch(stats->max());
     }
     else if (pqType == parquet::Type::BOOLEAN)
     {
-        parquet::TypedRowGroupStatistics<parquet::DataType<parquet::Type::BOOLEAN>> *stats =
-            (parquet::TypedRowGroupStatistics<parquet::DataType<parquet::Type::BOOLEAN>> *)_stats.get();
+        auto *stats = dynamic_cast<parquet::BoolStatistics *>(_stats.get());
 
         min = stats->min();
         max = stats->max();
@@ -273,8 +263,7 @@ bool ParquetCursor::currentRowGroupSatisfiesIntegerFilter(Constraint &constraint
     return true;
 }
 
-bool ParquetCursor::currentRowGroupSatisfiesDoubleFilter(Constraint &constraint,
-                                                         std::shared_ptr<parquet::RowGroupStatistics> _stats)
+bool ParquetCursor::currentRowGroupSatisfiesDoubleFilter(Constraint &constraint, std::shared_ptr<parquet::Statistics> _stats)
 {
     if (!_stats->HasMinMax())
     {
@@ -294,16 +283,14 @@ bool ParquetCursor::currentRowGroupSatisfiesDoubleFilter(Constraint &constraint,
 
     if (pqType == parquet::Type::DOUBLE)
     {
-        parquet::TypedRowGroupStatistics<parquet::DataType<parquet::Type::DOUBLE>> *stats =
-            (parquet::TypedRowGroupStatistics<parquet::DataType<parquet::Type::DOUBLE>> *)_stats.get();
+        auto *stats = dynamic_cast<parquet::DoubleStatistics *>(_stats.get());
 
         min = stats->min();
         max = stats->max();
     }
     else if (pqType == parquet::Type::FLOAT)
     {
-        parquet::TypedRowGroupStatistics<parquet::DataType<parquet::Type::FLOAT>> *stats =
-            (parquet::TypedRowGroupStatistics<parquet::DataType<parquet::Type::FLOAT>> *)_stats.get();
+        auto *stats = dynamic_cast<parquet::FloatStatistics *>(_stats.get());
 
         min = stats->min();
         max = stats->max();
@@ -521,6 +508,7 @@ bool ParquetCursor::currentRowSatisfiesDoubleFilter(Constraint &constraint)
 // data, which provides substantial performance benefits.
 bool ParquetCursor::currentRowGroupSatisfiesFilter()
 {
+    auto rowGroupMetadata = rowGroup->metadata();
     for (unsigned int i = 0; i < constraints.size(); i++)
     {
         int column = constraints[i].column;
@@ -536,7 +524,7 @@ bool ParquetCursor::currentRowGroupSatisfiesFilter()
             std::unique_ptr<parquet::ColumnChunkMetaData> md = rowGroupMetadata->ColumnChunk(column);
             if (md->is_stats_set())
             {
-                std::shared_ptr<parquet::RowGroupStatistics> stats = md->statistics();
+                std::shared_ptr<parquet::Statistics> stats = md->statistics();
 
                 // SQLite is much looser with types than you might expect if you
                 // come from a Postgres background. The constraint '30.0' (that is,
@@ -559,7 +547,7 @@ bool ParquetCursor::currentRowGroupSatisfiesFilter()
                 {
                     parquet::Type::type pqType = types[column];
 
-                    if (pqType == parquet::Type::BYTE_ARRAY && logicalTypes[column] == parquet::LogicalType::UTF8)
+                    if (pqType == parquet::Type::BYTE_ARRAY && isStringType(column))
                     {
                         rv = currentRowGroupSatisfiesTextFilter(constraints[i], stats);
                     }
@@ -567,8 +555,8 @@ bool ParquetCursor::currentRowGroupSatisfiesFilter()
                     {
                         rv = currentRowGroupSatisfiesBlobFilter(constraints[i], stats);
                     }
-                    else if (pqType == parquet::Type::INT32 || pqType == parquet::Type::INT64 ||
-                             pqType == parquet::Type::INT96 || pqType == parquet::Type::BOOLEAN)
+                    else if (pqType == parquet::Type::INT32 || pqType == parquet::Type::INT64 || pqType == parquet::Type::INT96 ||
+                             pqType == parquet::Type::BOOLEAN)
                     {
                         rv = currentRowGroupSatisfiesIntegerFilter(constraints[i], stats);
                     }
@@ -619,9 +607,11 @@ start:
 
     rowGroupStartRowId = rowId;
     rowGroupId++;
-    rowGroupMetadata = reader->metadata()->RowGroup(rowGroupId);
+
+    rowGroup = this->table->getRowGroupReader(rowGroupId);
+    const auto *const rowGroupMetadata = rowGroup->metadata();
+
     rowGroupSize = rowsLeftInRowGroup = rowGroupMetadata->num_rows();
-    rowGroup = reader->RowGroup(rowGroupId);
     for (unsigned int i = 0; i < scanners.size(); i++)
         scanners[i] = NULL;
 
@@ -630,15 +620,21 @@ start:
         types.push_back(rowGroupMetadata->schema()->Column(0)->physical_type());
     }
 
-    while (logicalTypes.size() < (unsigned int)rowGroupMetadata->num_columns())
+    while (isColumnStringType.size() < (unsigned int)rowGroupMetadata->num_columns())
     {
-        logicalTypes.push_back(rowGroupMetadata->schema()->Column(0)->logical_type());
+        isColumnStringType.push_back(rowGroupMetadata->schema()->Column(0)->logical_type()->is_string());
+    }
+
+    while (isColumnRepeatedType.size() < (unsigned int)rowGroupMetadata->num_columns())
+    {
+        isColumnRepeatedType.push_back(rowGroupMetadata->schema()->GetColumnRoot(0)->is_repeated());
     }
 
     for (unsigned int i = 0; i < (unsigned int)rowGroupMetadata->num_columns(); i++)
     {
         types[i] = rowGroupMetadata->schema()->Column(i)->physical_type();
-        logicalTypes[i] = rowGroupMetadata->schema()->Column(i)->logical_type();
+        isColumnStringType[i] = rowGroupMetadata->schema()->Column(i)->logical_type()->is_string();
+        isColumnRepeatedType[i] = rowGroupMetadata->schema()->GetColumnRoot(i)->is_repeated();
     }
 
     for (unsigned int i = 0; i < colRows.size(); i++)
@@ -699,15 +695,15 @@ bool ParquetCursor::currentRowSatisfiesFilter()
         else
         {
 
-            if (logicalTypes[column] == parquet::LogicalType::UTF8)
+            if (isStringType(column))
             {
                 rv = currentRowSatisfiesTextFilter(constraints[i]);
             }
             else
             {
                 parquet::Type::type pqType = types[column];
-                if (pqType == parquet::Type::INT32 || pqType == parquet::Type::INT64 ||
-                    pqType == parquet::Type::INT96 || pqType == parquet::Type::BOOLEAN)
+                if (pqType == parquet::Type::INT32 || pqType == parquet::Type::INT64 || pqType == parquet::Type::INT96 ||
+                    pqType == parquet::Type::BOOLEAN)
                 {
                     rv = currentRowSatisfiesIntegerFilter(constraints[i]);
                 }
@@ -771,6 +767,8 @@ void ParquetCursor::ensureColumn(int col)
     if (col == -1)
         return;
 
+    auto rowGroupMetadata = rowGroup->metadata();
+
     // need to ensure a scanner exists (and skip the # of rows in the rowgroup)
     if (scanners[col].get() == NULL)
     {
@@ -821,7 +819,7 @@ void ParquetCursor::ensureColumn(int col)
             }
             case parquet::Type::INT64: {
                 parquet::Int64Scanner *s = (parquet::Int64Scanner *)scanners[col].get();
-                long rv = 0;
+                int64_t rv = 0;
                 s->NextValue(&rv, &wasNull);
                 break;
             }
@@ -841,8 +839,7 @@ void ParquetCursor::ensureColumn(int col)
                 // Should be impossible to get here as we should have forbidden this at
                 // CREATE time -- maybe file changed underneath us?
                 std::ostringstream ss;
-                ss << __FILE__ << ":" << __LINE__ << ": column " << col
-                   << " has unsupported type: " << parquet::TypeToString(types[col]);
+                ss << __FILE__ << ":" << __LINE__ << ": column " << col << " has unsupported type: " << parquet::TypeToString(types[col]);
                 throw std::invalid_argument(ss.str());
                 break;
             }
@@ -897,7 +894,7 @@ void ParquetCursor::ensureColumn(int col)
         }
         case parquet::Type::INT64: {
             parquet::Int64Scanner *s = (parquet::Int64Scanner *)scanners[col].get();
-            long rv = 0;
+            int64_t rv = 0;
             hadValue = s->NextValue(&rv, &wasNull);
             colIntValues[col] = rv;
             break;
@@ -923,8 +920,7 @@ void ParquetCursor::ensureColumn(int col)
             // Should be impossible to get here as we should have forbidden this at
             // CREATE time -- maybe file changed underneath us?
             std::ostringstream ss;
-            ss << __FILE__ << ":" << __LINE__ << ": column " << col
-               << " has unsupported type: " << parquet::TypeToString(types[col]);
+            ss << __FILE__ << ":" << __LINE__ << ": column " << col << " has unsupported type: " << parquet::TypeToString(types[col]);
             throw std::invalid_argument(ss.str());
             break;
         }
@@ -970,17 +966,13 @@ parquet::Type::type ParquetCursor::getPhysicalType(int col)
     return types[col];
 }
 
-parquet::LogicalType::type ParquetCursor::getLogicalType(int col)
+bool ParquetCursor::isStringType(int col)
 {
-    return logicalTypes[col];
+    return isColumnStringType[col];
 }
 
 void ParquetCursor::close()
 {
-    if (reader != NULL)
-    {
-        reader->Close();
-    }
 }
 
 void ParquetCursor::reset(std::vector<Constraint> constraints)
@@ -988,11 +980,6 @@ void ParquetCursor::reset(std::vector<Constraint> constraints)
     close();
     this->constraints = constraints;
     rowId = 0;
-    // TODO: consider having a long lived handle in ParquetTable that can be borrowed
-    // without incurring the cost of opening the file from scratch twice
-    reader = parquet::ParquetFileReader::OpenFile(table->getFile().data(), true, parquet::default_reader_properties(),
-                                                  table->getMetadata());
-
     rowGroupId = -1;
     rowGroupSize = 0;
     rowGroupStartRowId = 0;
@@ -1000,8 +987,8 @@ void ParquetCursor::reset(std::vector<Constraint> constraints)
     // TODO: or at least, fail fast if detected
     rowsLeftInRowGroup = 0;
 
-    numRows = reader->metadata()->num_rows();
-    numRowGroups = reader->metadata()->num_row_groups();
+    numRows = this->table->getNumRows();
+    numRowGroups = this->table->getNumRowGroups();
 }
 
 ParquetTable *ParquetCursor::getTable() const

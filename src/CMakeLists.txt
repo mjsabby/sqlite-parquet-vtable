@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.10)
+project(parquetsqlite)
+include_directories(../vendor/arrow-apache-arrow-3.0.0/cpp/src ../vendor/sqlite-3.34.1 ../vendor/utf8proc-2.6.1)
+if(WIN32)
+  add_compile_options(/MT)
+endif(WIN32)
+add_library (parquetsqlite STATIC "parquet.cpp" "parquet_cursor.cpp" "parquet_cursor.h" "parquet_filter.cpp" "parquet_filter.h" "parquet_table.cpp" "parquet_table.h" "sqliteinclude.c" "utf8procinclude.c")
+set_property(TARGET parquetsqlite PROPERTY POSITION_INDEPENDENT_CODE ON)

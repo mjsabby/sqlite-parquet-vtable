@@ -1,65 +1,47 @@
 # sqlite-parquet-vtable
 
-[![Build Status](https://travis-ci.org/cldellow/sqlite-parquet-vtable.svg?branch=master)](https://travis-ci.org/cldellow/sqlite-parquet-vtable)
-[![codecov](https://codecov.io/gh/cldellow/sqlite-parquet-vtable/branch/master/graph/badge.svg)](https://codecov.io/gh/cldellow/sqlite-parquet-vtable)
-
 A SQLite [virtual table](https://sqlite.org/vtab.html) extension to expose Parquet files as SQL tables. You may also find [csv2parquet](https://github.com/cldellow/csv2parquet/) useful.
 
 This [blog post](https://cldellow.com/2018/06/22/sqlite-parquet-vtable.html) provides some context on why you might use this.
 
 ## Installing
 
-### Download
-
-You can fetch a version built for Ubuntu 16.04 at https://s3.amazonaws.com/cldellow/public/libparquet/libparquet.so.xz
-
-### Building
+### Building on Linux
 
 ```
-./make-linux
+./build.sh
 ```
 
-The first run will git clone a bunch of libraries, patch them to be statically linkable and build them.
+This will generate `libParquetSQLite.so` and `libParquetSQLite.dbg` in the root folder where you ran `build.sh` from.
 
-Subsequent builds will only build the parquet virtual table extension.
-
-### Building (release)
-
-Run `./make-linux-pgo` to build an instrumented binary, run tests to collect real-life usage samples, then build an optimized binary. PGO seems to give a 5-10% reduction in query times.
-
-### Tests
-
-Run:
+### Building on Windows
 
 ```
-tests/create-queries-from-templates
-tests/test-all
+build.bat
 ```
 
+This will generate `ParquetSQLite.dll` and `ParquetSQLite.pdb` in the root folder where you ran `build.bat` from.
 
-## Use
+## Using
 
-```
-$ sqlite/sqlite3
-sqlite> .load build/linux/libparquet
-sqlite> CREATE VIRTUAL TABLE demo USING parquet('parquet-generator/99-rows-1.parquet');
-sqlite> SELECT * FROM demo;
-...if all goes well, you'll see data here!...
-```
+The module that is generated exposes the following platform ABI entry points:
 
-Note: if you get an error like:
+* `ParquetSQLiteProcessWideInit`
+* `ParquetSQLiteOpenDatabase`
+* `ParquetSQLiteExec`
+* `ParquetSQLiteFreeMemory`
+* `ParquetSQLiteCloseDatabase`
 
-```
-sqlite> .load build/linux/libparquet
-Error: parquet/libparquet.so: wrong ELF class: ELFCLASS64
-```
+A typical workflow is as follows:
 
-You have the 32-bit SQLite installed. To fix this, do:
+* ParquetSQLiteProcessWideInit("\tmpDir")
+* ParquetSQLiteOpenDatabase("\tmpDir\tmp.db", void** outParamSQLitePointer)
+* ParquetSQLiteExec(outParamSQLitePointer, "CREATE VIRTUAL TABLE MyDemo FROM parquet('c:/test1.parquet', 'c:/test2.parquet')", PerResultCallBackFunc, ContextPointer, char** outParamErrorMessage)
+* ParquetSQLiteExec(outParamSQLitePointer, "SELECT COUNT(*) FROM MyDemo WHERE SomeColumnInParquetFile = 5", ...)
+* More invocations of `ParquetSQLiteExec` if you want to do joins, or more queries on the same set of parquet files, etc.
+* `ParquetSQLiteCloseDatabase(outParamSQLitePointer)`
 
-```
-sudo apt-get remove --purge sqlite3
-sudo apt-get install sqlite3:amd64
-```
+Note: `ParquetSQLiteFreeMemory` is there only for the `errorMessage` parameter memory clean up when there is an error in `ParquetSQLiteExec`
 
 ## Supported features
 

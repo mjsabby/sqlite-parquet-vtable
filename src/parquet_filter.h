@@ -90,8 +90,8 @@ class Constraint
 {
   public:
     // Kind of a messy constructor function, but it's just for internal use, so whatever.
-    Constraint(RowGroupBitmap bitmap, int column, std::string columnName, ConstraintOperator op, ValueType type,
-               int64_t intValue, double doubleValue, std::vector<unsigned char> blobValue);
+    Constraint(RowGroupBitmap bitmap, int column, std::string columnName, ConstraintOperator op, ValueType type, int64_t intValue,
+               double doubleValue, std::vector<unsigned char> blobValue);
 
     RowGroupBitmap bitmap;
     int column; // underlying column in the query

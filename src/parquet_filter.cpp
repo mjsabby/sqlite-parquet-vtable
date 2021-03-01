@@ -1,9 +1,9 @@
 #include "parquet_filter.h"
 
-Constraint::Constraint(RowGroupBitmap bitmap, int column, std::string columnName, ConstraintOperator op, ValueType type,
-                       int64_t intValue, double doubleValue, std::vector<unsigned char> blobValue)
-    : bitmap(bitmap), column(column), columnName(columnName), op(op), type(type), intValue(intValue),
-      doubleValue(doubleValue), blobValue(blobValue), hadRows(false)
+Constraint::Constraint(RowGroupBitmap bitmap, int column, std::string columnName, ConstraintOperator op, ValueType type, int64_t intValue,
+                       double doubleValue, std::vector<unsigned char> blobValue)
+    : bitmap(bitmap), column(column), columnName(columnName), op(op), type(type), intValue(intValue), doubleValue(doubleValue),
+      blobValue(blobValue), hadRows(false)
 {
     RowGroupBitmap bm = bitmap;
     this->bitmap = bm;

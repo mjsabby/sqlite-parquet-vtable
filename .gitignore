@@ -349,9 +349,24 @@ MigrationBackup/
 # Ionide (cross platform F# VS Code tools) working folder
 .ionide/
 
-vendored-build/
+vendor/build/
+
+src/build/
 
 src/out/
 
 *.mod
+libParquetSQLite.dbg
+libParquetSQLite.so
+cmake_install.cmake
+libparquetsqlite.a
+CMakeCache.txt
+cmake_install.cmake
+Makefile
 
+CMakeFiles/
+output/
+output2/
+
+ParquetSQLite.dll
+ParquetSQLite.pdb
