@@ -413,7 +413,7 @@ bool ParquetCursor::currentRowSatisfiesIntegerFilter(Constraint &constraint)
     // CONSIDER: should we just store int64s everywhere?
     int64_t value = 0;
 
-    if (column == -1)
+    if (column == -1 || column == static_cast<int>(table->getNumColumns()) - 1)
     {
         value = rowId;
     }
@@ -515,7 +515,7 @@ bool ParquetCursor::currentRowGroupSatisfiesFilter()
         int op = constraints[i].op;
         bool rv = true;
 
-        if (column == -1)
+        if (column == -1 || column == static_cast<int>(table->getNumColumns()) - 1)
         {
             rv = currentRowGroupSatisfiesRowIdFilter(constraints[i]);
         }
@@ -615,27 +615,34 @@ start:
     for (unsigned int i = 0; i < scanners.size(); i++)
         scanners[i] = NULL;
 
-    while (types.size() < (unsigned int)rowGroupMetadata->num_columns())
+    auto numc = (unsigned int)rowGroupMetadata->num_columns();
+
+    while (types.size() < numc)
     {
         types.push_back(rowGroupMetadata->schema()->Column(0)->physical_type());
     }
 
-    while (isColumnStringType.size() < (unsigned int)rowGroupMetadata->num_columns())
+    while (isColumnStringType.size() < numc)
     {
         isColumnStringType.push_back(rowGroupMetadata->schema()->Column(0)->logical_type()->is_string());
     }
 
-    while (isColumnRepeatedType.size() < (unsigned int)rowGroupMetadata->num_columns())
+    while (isColumnRepeatedType.size() < numc)
     {
         isColumnRepeatedType.push_back(rowGroupMetadata->schema()->GetColumnRoot(0)->is_repeated());
     }
 
-    for (unsigned int i = 0; i < (unsigned int)rowGroupMetadata->num_columns(); i++)
+    for (unsigned int i = 0; i < numc; i++)
     {
         types[i] = rowGroupMetadata->schema()->Column(i)->physical_type();
         isColumnStringType[i] = rowGroupMetadata->schema()->Column(i)->logical_type()->is_string();
         isColumnRepeatedType[i] = rowGroupMetadata->schema()->GetColumnRoot(i)->is_repeated();
     }
+
+    // For VirtualRowId
+    types.push_back(parquet::Type::type::INT32);
+    isColumnStringType.push_back(false);
+    isColumnRepeatedType.push_back(false);
 
     for (unsigned int i = 0; i < colRows.size(); i++)
     {
@@ -763,8 +770,8 @@ bool ParquetCursor::eof()
 
 void ParquetCursor::ensureColumn(int col)
 {
-    // -1 signals rowid, which is trivially available
-    if (col == -1)
+    // -1 or penultimate num of col signals rowid, which is trivially available
+    if (col == -1 || col == static_cast<int>(table->getNumColumns()) - 1)
         return;
 
     auto rowGroupMetadata = rowGroup->metadata();
@@ -935,7 +942,7 @@ void ParquetCursor::ensureColumn(int col)
 bool ParquetCursor::isNull(int col)
 {
     // -1 is rowid, which is trivially non null
-    if (col == -1)
+    if (col == -1 || col == static_cast<int>(table->getNumColumns()) - 1)
         return false;
 
     return colNulls[col];

@@ -71,6 +71,8 @@ void ParquetTable::CreateStatement(const parquet::SchemaDescriptor *schema)
         columnNames.push_back(_col->name());
     }
 
+    columnNames.push_back("VirtualRowId");
+
     for (auto i = 0; i < schema->num_columns(); i++)
     {
         auto _col = schema->GetColumnRoot(i);
@@ -189,6 +191,9 @@ void ParquetTable::CreateStatement(const parquet::SchemaDescriptor *schema)
         text += " ";
         text += type;
     }
+
+    text += ", \"VirtualRowId\" INT";
+
     text += ");";
     this->create = text;
 }

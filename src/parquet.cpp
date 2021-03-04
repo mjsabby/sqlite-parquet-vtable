@@ -281,6 +281,10 @@ static int parquetColumn(sqlite3_vtab_cursor *cur, /* The cursor */
         {
             sqlite3_result_null(ctx);
         }
+        else if (col == static_cast<int>(cursor->getTable()->getNumColumns()) - 1)
+        {
+            sqlite3_result_int(ctx, cursor->getRowId());
+        }
         else
         {
             switch (cursor->getPhysicalType(col))
